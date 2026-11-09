@@ -1,0 +1,60 @@
+name: Build Fairy Manager APK
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # No manual unzip needed: the project .zip in the repo is unpacked here.
+      - name: Unpack project zip
+        run: |
+          mkdir -p "$RUNNER_TEMP/proj"
+          for z in *.zip; do
+            if unzip -l "$z" | grep -q "settings.gradle.kts"; then
+              unzip -q -o "$z" -d "$RUNNER_TEMP/proj"
+              break
+            fi
+          done
+          S=$(find "$RUNNER_TEMP/proj" -name settings.gradle.kts | head -n1)
+          if [ -z "$S" ]; then echo "No project zip found in repo root"; exit 1; fi
+          echo "PROJECT_DIR=$(dirname "$S")" >> "$GITHUB_ENV"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp "$PROJECT_DIR"/app/build/outputs/apk/release/*.apk out/FairyManager.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FairyManager-APK
+          path: out/FairyManager.apk
+
+      - name: Publish GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/FairyManager.apk
+          
